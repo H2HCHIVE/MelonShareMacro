@@ -46,157 +46,208 @@ class MainActivity : Activity() {
     // 현재 실행에서 방문한 사진 ID
     private val photoVisited = LinkedHashSet<String>()
 
-    // 포토 상세 페이지의 다음 버튼
-    // button뿐 아니라 a 태그 등에도 대응
-    private val NEXT_SELS = """['.btn_photo_next','[data-action="next"]']"""
+    // 상세 페이지의 다음 사진 버튼
+    private val NEXT_SELS = """['.btn_photo_next']"""
 
-    private val DIAG_SELS = """['.btn_photo_next','button[data-action]','[title*="이전"]','[title*="다음"]']"""
+    private val DIAG_SELS =
+        """['.btn_photo_next','button[data-action]','[title*="이전"]','[title*="다음"]']"""
 
     private val FIRST_PHOTO_JS = """
 (function(){
-  function vis(e){return e&&(e.offsetParent!==null||e.getClientRects().length>0);}
-  var target=null,info='';
-  var sels=['a[href*="photo_detail"]','[onclick*="photo_detail"]','a[href*="photoId"]','[data-photo-id]','[data-photoid]'];
-  for(var i=0;i<sels.length&&!target;i++){
-    var els=document.querySelectorAll(sels[i]);
-    for(var j=0;j<els.length;j++){if(vis(els[j])){target=els[j];info=sels[i];break;}}
+  function vis(e){
+    return e && (e.offsetParent !== null || e.getClientRects().length > 0);
   }
-  var bestN=0,groups=[];
+
+  var target = null;
+  var info = '';
+
+  var sels = [
+    'a[href*="photo_detail"]',
+    '[onclick*="photo_detail"]',
+    'a[href*="photoId"]',
+    '[data-photo-id]',
+    '[data-photoid]'
+  ];
+
+  for(var i=0; i<sels.length && !target; i++){
+    var els = document.querySelectorAll(sels[i]);
+
+    for(var j=0; j<els.length; j++){
+      if(vis(els[j])){
+        target = els[j];
+        info = sels[i];
+        break;
+      }
+    }
+  }
+
+  var bestN = 0;
+  var groups = [];
+
   if(!target){
-    var best=null;
+    var best = null;
+
     document.querySelectorAll('ul,ol').forEach(function(ul){
-      var lis=ul.querySelectorAll(':scope > li');var n=0;
-      for(var k=0;k<lis.length;k++){if(lis[k].querySelector('img'))n++;}
-      if(n>0){groups.push(n+'x '+String(ul.getAttribute('class')||ul.id||ul.tagName));}
-      if(n>bestN){bestN=n;best=ul;}
+      var lis = ul.querySelectorAll(':scope > li');
+      var n = 0;
+
+      for(var k=0; k<lis.length; k++){
+        if(lis[k].querySelector('img')) n++;
+      }
+
+      if(n > 0){
+        groups.push(
+          n + 'x ' + String(ul.getAttribute('class') || ul.id || ul.tagName)
+        );
+      }
+
+      if(n > bestN){
+        bestN = n;
+        best = ul;
+      }
     });
-    if(best&&bestN>=4){
-      var lis2=best.querySelectorAll(':scope > li');
-      for(var m=0;m<lis2.length;m++){
-        if(lis2[m].querySelector('img')&&vis(lis2[m])){
-          target=lis2[m].querySelector('a,button,[onclick]')||lis2[m].querySelector('img');
-          info='ul-grid('+bestN+')';break;
+
+    if(best && bestN >= 4){
+      var lis2 = best.querySelectorAll(':scope > li');
+
+      for(var m=0; m<lis2.length; m++){
+        if(lis2[m].querySelector('img') && vis(lis2[m])){
+          target =
+            lis2[m].querySelector('a,button,[onclick]') ||
+            lis2[m].querySelector('img');
+
+          info = 'ul-grid(' + bestN + ')';
+          break;
         }
       }
     }
   }
-  if(!target){return 'none: groups='+groups.slice(0,6).join(' | ');}
-  var t=target.closest('a,button,[onclick]')||target;
+
+  if(!target){
+    return 'none: groups=' + groups.slice(0,6).join(' | ');
+  }
+
+  var t = target.closest('a,button,[onclick]') || target;
   t.click();
-  return 'clicked['+info+']: '+String(t.outerHTML||'').substring(0,180)+' || groups='+groups.slice(0,6).join(' | ');
+
+  return 'clicked[' + info + ']: ' +
+    String(t.outerHTML || '').substring(0,180) +
+    ' || groups=' + groups.slice(0,6).join(' | ');
 })()
 """
 
+    // 오른쪽 화살표를 한 번만 클릭
     private val NEXT_JS = """
-(function(s){
-  function vis(e){return e&&(e.offsetParent!==null||e.getClientRects().length>0);}
-  function enabled(e){return !e.disabled&&!(e.classList&&e.classList.contains('disabled'));}
-  var sels=__SELS__;
-
-  if(s===0||s===2){
-    for(var i=0;i<sels.length;i++){
-      var els=document.querySelectorAll(sels[i]);
-      for(var j=0;j<els.length;j++){
-        var e=els[j];
-        if(vis(e)&&enabled(e)){
-          if(s===2){
-            ['mousedown','mouseup','click'].forEach(function(t){
-              e.dispatchEvent(new MouseEvent(t,{
-                bubbles:true,
-                cancelable:true,
-                view:window
-              }));
-            });
-          } else {
-            e.click();
-          }
-          return 'btn['+sels[i]+']: '+String(e.outerHTML||'').substring(0,260);
-        }
-      }
-    }
-    return 'no-enabled-button';
+(function(){
+  function vis(e){
+    return e && (
+      e.offsetParent !== null ||
+      e.getClientRects().length > 0
+    );
   }
 
-  ['keydown','keyup'].forEach(function(t){
-    var ev=new KeyboardEvent(t,{
-      key:'ArrowRight',
-      code:'ArrowRight',
-      keyCode:39,
-      which:39,
-      bubbles:true
-    });
-    document.dispatchEvent(ev);
-    if(document.body){
-      document.body.dispatchEvent(ev);
-    }
-  });
+  var e = document.querySelector('.btn_photo_next');
 
-  return 'key-ArrowRight';
-})(__S__)
+  if(!e){
+    return 'no-next-button';
+  }
+
+  if(!vis(e)){
+    return 'next-button-hidden';
+  }
+
+  var cls = String(e.className || '');
+
+  if(
+    e.disabled ||
+    e.getAttribute('aria-disabled') === 'true' ||
+    cls.indexOf('disabled') >= 0
+  ){
+    return 'next-button-disabled: ' +
+      String(e.outerHTML || '').substring(0,200);
+  }
+
+  e.click();
+
+  return 'clicked: ' +
+    String(e.outerHTML || '').substring(0,200);
+})()
 """
 
     private val DIAG_JS = """
 (function(){
-  var sels=__SELS__;
-  var out=[];
+  var sels = __SELS__;
+  var out = [];
+
   sels.forEach(function(s){
-    var els=document.querySelectorAll(s);
-    for(var i=0;i<els.length&&out.length<16;i++){
-      var e=els[i];
+    var els = document.querySelectorAll(s);
+
+    for(var i=0; i<els.length && out.length<16; i++){
+      var e = els[i];
+
       out.push(
-        s+' => '+e.tagName+
-        ' class='+String(e.getAttribute('class')||'')+
-        ' title='+String(e.getAttribute('title')||'')+
-        ' action='+String(e.getAttribute('data-action')||'')+
-        ' vis='+(e.offsetParent!==null)
+        s + ' => ' + e.tagName +
+        ' class=' + String(e.getAttribute('class') || '') +
+        ' title=' + String(e.getAttribute('title') || '') +
+        ' action=' + String(e.getAttribute('data-action') || '') +
+        ' disabled=' + String(e.disabled) +
+        ' vis=' + (e.offsetParent !== null)
       );
     }
   });
-  return out.length?out.join(' | '):'no-candidates';
+
+  return out.length ? out.join(' | ') : 'no-candidates';
 })()
 """
 
     private val PROBE_JS = """
 (function(){
-  var best=null,area=0;
+  var best = null;
+  var area = 0;
+
   document.querySelectorAll('img').forEach(function(i){
-    var a=(i.naturalWidth||0)*(i.naturalHeight||0);
-    if(a>area&&i.offsetParent!==null){
-      area=a;
-      best=i;
+    var a = (i.naturalWidth || 0) * (i.naturalHeight || 0);
+
+    if(a > area && i.offsetParent !== null){
+      area = a;
+      best = i;
     }
   });
 
-  var cnt='';
+  var cnt = '';
+
   document.querySelectorAll('span,em,strong,p,div').forEach(function(e){
-    if(!cnt&&e.children.length===0){
-      var t=(e.textContent||'').trim();
+    if(!cnt && e.children.length === 0){
+      var t = (e.textContent || '').trim();
+
       if(/^\d+\s*\/\s*\d+$/.test(t)){
-        cnt=t;
+        cnt = t;
       }
     }
   });
 
-  return 'href='+location.href+
-    ' | mainImg='+(best?String(best.src).substring(0,140):'none')+
-    ' | counter='+cnt;
+  return 'href=' + location.href +
+    ' | mainImg=' + (best ? String(best.src).substring(0,180) : 'none') +
+    ' | counter=' + cnt;
 })()
 """
 
     private val PAGER_JS = """
 (function(){
-  var out=[];
+  var out = [];
+
   document.querySelectorAll(
     'a[href*="sendPage"],a[href*="pageObj"],.page_num a,.paginate a,.pageNum a,[class*="page"] a'
   ).forEach(function(a){
-    if(out.length<14){
+    if(out.length < 14){
       out.push(
-        String(a.textContent||'').trim().substring(0,10)+
-        '=>'+String(a.getAttribute('href')||'').substring(0,60)
+        String(a.textContent || '').trim().substring(0,10) +
+        '=>' + String(a.getAttribute('href') || '').substring(0,60)
       );
     }
   });
-  return out.length?out.join(' | '):'no-pager';
+
+  return out.length ? out.join(' | ') : 'no-pager';
 })()
 """
 
@@ -513,25 +564,38 @@ class MainActivity : Activity() {
         }
     }
 
-    // 메인 사진 이미지 src에서 photoId 추출
+    // 상세 화면에서 가장 큰 사진의 파일명으로 ID 추출
     private fun readPhotoImageId(cb: (String?) -> Unit) {
         val js = """
         (function(){
-          var best = null;
-          var area = 0;
+          var candidates = [];
 
           document.querySelectorAll('img').forEach(function(img){
-            if (img.offsetParent === null) return;
+            if(img.offsetParent === null) return;
 
-            var a = (img.naturalWidth || 0) * (img.naturalHeight || 0);
+            var src = img.currentSrc || img.src || '';
 
-            if (a > area) {
-              area = a;
-              best = img;
+            if(!/\/\d{6,}_\d{8,}[^/]*\.(jpg|jpeg|png|webp)/i.test(src)){
+              return;
             }
+
+            var area =
+              (img.naturalWidth || 0) *
+              (img.naturalHeight || 0);
+
+            candidates.push({
+              src: src,
+              area: area,
+              width: img.naturalWidth || 0,
+              height: img.naturalHeight || 0
+            });
           });
 
-          return best ? best.src : '';
+          candidates.sort(function(a,b){
+            return b.area - a.area;
+          });
+
+          return candidates.length ? candidates[0].src : '';
         })()
         """
 
@@ -579,7 +643,7 @@ class MainActivity : Activity() {
         when {
             url.contains("photo_detail") -> {
                 diagNext()
-                handler.postDelayed({ photoStep() }, 300)
+                handler.postDelayed({ photoStep() }, 500)
             }
 
             url.contains("/artist/photo.htm") -> {
@@ -619,7 +683,7 @@ class MainActivity : Activity() {
             if (href.contains("photo_detail") && href.contains("photoId=")) {
                 clog("PHOTO 상세 진입 확인 href=$href")
                 diagNext()
-                handler.postDelayed({ photoStep() }, 400)
+                handler.postDelayed({ photoStep() }, 500)
             } else if (tries >= 12) {
                 finishPhoto("상세 페이지로 이동하지 않았습니다 (href=$href)")
             } else {
@@ -631,15 +695,9 @@ class MainActivity : Activity() {
         }
     }
 
+    // 현재 사진 ID를 수집하고 다음 사진으로 이동
     private fun photoStep() {
         if (!photoRunning) return
-
-        photoSteps++
-
-        if (photoSteps > 600) {
-            finishPhoto("최대 단계(600) 도달")
-            return
-        }
 
         readPhotoImageId { id ->
             if (!photoRunning) return@readPhotoImageId
@@ -648,12 +706,12 @@ class MainActivity : Activity() {
                 photoNoId++
 
                 clog(
-                    "PHOTO step=$photoSteps 이미지 ID 없음 " +
+                    "PHOTO 이미지 ID 읽기 실패 " +
                     "(연속 $photoNoId)"
                 )
 
-                if (photoNoId >= 8) {
-                    finishPhoto("메인 이미지에서 photoId를 읽지 못했습니다")
+                if (photoNoId >= 10) {
+                    finishPhoto("큰 사진의 이미지 ID를 읽지 못했습니다")
                 } else {
                     handler.postDelayed({ photoStep() }, 700)
                 }
@@ -663,37 +721,17 @@ class MainActivity : Activity() {
 
             photoNoId = 0
 
-            // 이미지가 아직 변경되지 않은 경우
-            if (id == photoLastId) {
-                photoSame++
-
-                clog(
-                    "PHOTO step=$photoSteps 같은 이미지 유지 " +
-                    "id=$id (연속 $photoSame)"
-                )
-
-                if (photoSame >= 8) {
-                    finishPhoto("이미지가 변경되지 않아 순회를 종료했습니다")
-                } else {
-                    val strategy = when (photoSame) {
-                        2 -> 1
-                        4 -> 2
-                        else -> 0
-                    }
-
-                    if (photoSame % 2 == 0) {
-                        triggerNext(strategy)
-                    }
-
-                    handler.postDelayed({ photoStep() }, 1000)
-                }
-
-                return@readPhotoImageId
-            }
-
-            // 이번 실행에서 이미 방문한 사진이면 순환 종료
+            // 이미 방문한 사진인지 확인
             if (id in photoVisited) {
-                finishPhoto("이미 방문한 사진으로 돌아왔습니다: $id")
+                if (id == photoLastId) {
+                    photoSame++
+                    clog(
+                        "PHOTO 같은 이미지 확인 id=$id " +
+                        "연속=$photoSame"
+                    )
+                } else {
+                    finishPhoto("이미 방문한 사진으로 돌아왔습니다: $id")
+                }
                 return@readPhotoImageId
             }
 
@@ -711,47 +749,107 @@ class MainActivity : Activity() {
 
             photoLastId = id
             photoSame = 0
+            photoSteps++
 
             clog(
-                "PHOTO step=$photoSteps " +
+                "PHOTO 수집 step=$photoSteps " +
                 "${if (isNew) "신규" else "기존 누적 ID"} " +
-                "imageId=$id 이번방문=${photoVisited.size} " +
+                "imageId=$id 방문=${photoVisited.size} " +
                 "신규=$photoNew 누적=${set.size}"
             )
 
-            refresh("포토 순회 중… 신규 $photoNew (누적 ${set.size})")
+            refresh(
+                "포토 순회 중… 이번 실행 ${photoVisited.size}장 " +
+                "(신규 $photoNew / 누적 ${set.size})"
+            )
 
-            triggerNext(0)
-
-            handler.postDelayed({ photoStep() }, 1000)
+            // 현재 사진을 저장한 후 다음 사진으로 이동
+            clickNextAndWait(id)
         }
     }
 
-    /** strategy 0=버튼 클릭, 1=오른쪽 방향키, 2=마우스 이벤트 */
-    private fun triggerNext(strategy: Int) {
-        val js = NEXT_JS
-            .replace("__SELS__", NEXT_SELS)
-            .replace("__S__", strategy.toString())
+    // 다음 버튼을 한 번 누르고 실제 이미지 변경을 기다림
+    private fun clickNextAndWait(currentId: String) {
+        if (!photoRunning) return
 
-        web.evaluateJavascript(js) { raw ->
-            if (photoSteps <= 5 || strategy > 0) {
-                clog(
-                    "PHOTO NEXT 전략=$strategy 결과=${decode(raw)}"
-                )
+        web.evaluateJavascript(NEXT_JS) { raw ->
+            if (!photoRunning) return@evaluateJavascript
+
+            val result = decode(raw)
+
+            clog("PHOTO NEXT 클릭 id=$currentId 결과=$result")
+
+            when {
+                result == "no-next-button" -> {
+                    finishPhoto("다음 사진 버튼을 찾지 못했습니다")
+                }
+
+                result == "next-button-hidden" -> {
+                    finishPhoto("다음 사진 버튼이 화면에 표시되지 않습니다")
+                }
+
+                result.startsWith("next-button-disabled") -> {
+                    finishPhoto("마지막 사진에 도달했습니다")
+                }
+
+                result.startsWith("clicked") -> {
+                    waitPhotoChanged(currentId, 0)
+                }
+
+                else -> {
+                    finishPhoto("다음 사진 버튼 실행 실패: $result")
+                }
             }
         }
+    }
 
-        if (photoSteps <= 3 || strategy > 0) {
-            handler.postDelayed({
-                if (photoRunning) {
-                    readPhotoImageId { id ->
-                        clog(
-                            "PHOTO 다음 버튼 실행 후 이미지 ID=" +
-                            (id ?: "확인 실패")
-                        )
-                    }
-                }
-            }, 900)
+    // 사진 ID가 실제로 바뀌었는지 확인
+    private fun waitPhotoChanged(oldId: String, attempt: Int) {
+        if (!photoRunning) return
+
+        readPhotoImageId { newId ->
+            if (!photoRunning) return@readPhotoImageId
+
+            if (newId != null && newId != oldId) {
+                clog(
+                    "PHOTO 변경 확인 $oldId -> $newId " +
+                    "(대기 ${attempt}회)"
+                )
+
+                handler.postDelayed(
+                    { photoStep() },
+                    250
+                )
+
+                return@readPhotoImageId
+            }
+
+            // 최대 12초 동안 사진 변경을 기다림
+            if (attempt >= 30) {
+                clog(
+                    "PHOTO 변경 시간 초과 " +
+                    "기존=$oldId 현재=${newId ?: "ID 없음"}"
+                )
+
+                finishPhoto(
+                    "다음 사진으로 이동하지 않았습니다. " +
+                    "마지막 사진이거나 다음 버튼 동작을 확인해야 합니다"
+                )
+                return@readPhotoImageId
+            }
+
+            if (attempt % 5 == 0) {
+                clog(
+                    "PHOTO 변경 대기 기존=$oldId " +
+                    "현재=${newId ?: "ID 없음"} " +
+                    "대기=${attempt * 400}ms"
+                )
+            }
+
+            handler.postDelayed(
+                { waitPhotoChanged(oldId, attempt + 1) },
+                400
+            )
         }
     }
 
@@ -780,9 +878,11 @@ class MainActivity : Activity() {
         }
 
         clog(
-            "PHOTO 종료: $reason 신규=$photoNew " +
+            "PHOTO 종료: $reason " +
+            "신규=$photoNew " +
             "이번방문=${photoVisited.size} " +
-            "누적=${set?.size ?: 0} 샘플URL=$sample"
+            "누적=${set?.size ?: 0} " +
+            "샘플URL=$sample"
         )
 
         refresh("포토 순회 종료: $reason")
