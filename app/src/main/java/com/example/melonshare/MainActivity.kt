@@ -41,10 +41,13 @@ class MainActivity : Activity() {
     private var photoNoId = 0
     private var photoSteps = 0
     private var photoNew = 0
+    private var photoUsePrev = false
+    private var lastTriggerPrev = false
 
     // 사진 넘기기 버튼 (댓글 페이지 이동 버튼 .btn_next 와 구분)
-    private val NEXT_SELS = """['button.btn_photo_next','.btn_photo_next']"""
-    private val DIAG_SELS = """['.btn_photo_next','.btn_photo_prev','.btn_detail_next','.btn_next','[title*="다음"]']"""
+    private val NEXT_SELS = """['button.btn_photo_next','button[data-action="next"]']"""
+    private val PREV_SELS = """['button[data-action="prev"]','button[title="이전"]','.btn_photo_prev']"""
+    private val DIAG_SELS = """['.btn_photo_next','button[data-action]','[title*="이전"]','[title*="다음"]']"""
 
     private val FIRST_PHOTO_JS = """
 (function(){
@@ -94,7 +97,7 @@ class MainActivity : Activity() {
         if(vis(e)&&enabled(e)){
           if(s===2){['mousedown','mouseup','click'].forEach(function(t){e.dispatchEvent(new MouseEvent(t,{bubbles:true,cancelable:true,view:window}));});}
           else{e.click();}
-          return 'btn['+sels[i]+']: '+String(e.outerHTML||'').substring(0,120);
+          return 'btn['+sels[i]+']: '+String(e.outerHTML||'').substring(0,260);
         }
       }
     }
@@ -115,12 +118,40 @@ class MainActivity : Activity() {
   var out=[];
   sels.forEach(function(s){
     var els=document.querySelectorAll(s);
-    for(var i=0;i<els.length&&out.length<14;i++){
+    for(var i=0;i<els.length&&out.length<16;i++){
       var e=els[i];
-      out.push(s+' => '+e.tagName+' class='+String(e.getAttribute('class')||'')+' title='+String(e.getAttribute('title')||'')+' vis='+(e.offsetParent!==null));
+      out.push(s+' => '+e.tagName+' class='+String(e.getAttribute('class')||'')+' title='+String(e.getAttribute('title')||'')+' action='+String(e.getAttribute('data-action')||'')+' vis='+(e.offsetParent!==null));
     }
   });
   return out.length?out.join(' | '):'no-candidates';
+})()
+"""
+
+    private val PROBE_JS = """
+(function(){
+  var best=null,area=0;
+  document.querySelectorAll('img').forEach(function(i){
+    var a=(i.naturalWidth||0)*(i.naturalHeight||0);
+    if(a>area&&i.offsetParent!==null){area=a;best=i;}
+  });
+  var cnt='';
+  document.querySelectorAll('span,em,strong,p,div').forEach(function(e){
+    if(!cnt&&e.children.length===0){
+      var t=(e.textContent||'').trim();
+      if(/^\d+\s*\/\s*\d+$/.test(t)){cnt=t;}
+    }
+  });
+  return 'href='+location.href+' | mainImg='+(best?String(best.src).substring(0,140):'none')+' | counter='+cnt;
+})()
+"""
+
+    private val PAGER_JS = """
+(function(){
+  var out=[];
+  document.querySelectorAll('a[href*="sendPage"],a[href*="pageObj"],.page_num a,.paginate a,.pageNum a,[class*="page"] a').forEach(function(a){
+    if(out.length<14){out.push(String(a.textContent||'').trim().substring(0,10)+'=>'+String(a.getAttribute('href')||'').substring(0,60));}
+  });
+  return out.length?out.join(' | '):'no-pager';
 })()
 """
 
@@ -245,17 +276,17 @@ class MainActivity : Activity() {
         refresh("${c.label} 로딩 중…")
     }
 
-    // ================= 곡 / 앨범 / 영상: 목록 HTML 수집 (변경 없음) =================
+    // ================= 목록 HTML 수집 (곡/앨범 로직 변경 없음, 포토도 목록 수집 가능) =================
 
     private fun collect() {
         val cat = current
-        if (cat == Cat.PHOTO) {
-            toast("포토는 '포토 순회' 버튼을 사용하세요")
-            return
-        }
         val url = web.url ?: ""
         if (!pageReady && web.progress < 100) {
             toast("페이지 로딩 중입니다. 잠시 후 다시 누르세요")
+            return
+        }
+        if (cat == Cat.PHOTO && !url.contains("/artist/photo.htm")) {
+            toast("포토 '목록' 페이지에서 눌러주세요 (상세 페이지에서는 '포토 순회')")
             return
         }
         val onTabPage = cat.pathMarker.isEmpty() || url.contains(cat.pathMarker)
@@ -308,15 +339,19 @@ class MainActivity : Activity() {
 
             val hints = Regex("(?:전체|총)\\s*([0-9,]{1,6})").findAll(text)
                 .take(5).map { it.value.replace("\n", " ") }.toList()
+            val thumbs = if (cat == Cat.PHOTO) " thumbs=" + Regex("class=\"thumb\"").findAll(html).count() else ""
             clog(
                 "COLLECT ${cat.label} url=${web.url} 시도=$attempt htmlLen=${html.length} textLen=${text.length} " +
-                    "화면표시개수힌트=$hints 패턴별(마지막읽기)=$perPattern 이번수집=${acc.size} 신규=$added 누적=${set.size}"
+                    "화면표시개수힌트=$hints 패턴별(마지막읽기)=$perPattern 이번수집=${acc.size} 신규=$added 누적=${set.size}$thumbs"
             )
             clog("  ID 샘플: ${acc.take(5)}")
             val samples = Regex("(?:onclick|href|data-[\\w-]+)=[\"']([^\"']*(?:mv|Mv|MV|video|Video|photo|Photo)[^\"']*)[\"']")
                 .findAll(html).map { it.groupValues[1].take(150) }.distinct().take(12).toList()
             if (cat == Cat.MV || acc.isEmpty()) {
                 samples.forEach { clog("  후보속성: $it") }
+            }
+            if (cat == Cat.PHOTO) {
+                web.evaluateJavascript(PAGER_JS) { r -> clog("  PAGER: ${decode(r)}") }
             }
             refresh("${cat.label} ${added}개 추가 (이번 ${acc.size}개 발견)")
         }
@@ -352,6 +387,7 @@ class MainActivity : Activity() {
         }
         photoRunning = true
         photoLastId = null; photoSame = 0; photoNoId = 0; photoSteps = 0; photoNew = 0
+        photoUsePrev = false; lastTriggerPrev = false
         photoBtn.text = "순회 중지"
         val url = web.url ?: ""
         clog("PHOTO 순회 시작 url=$url")
@@ -421,6 +457,10 @@ class MainActivity : Activity() {
                 // 시작 지점이 이미 수집된 ID여도 종료하지 않고 시작점으로 본다
                 val isNew = set.add(id)
                 if (isNew) photoNew++
+                if (lastTriggerPrev && !photoUsePrev && photoSame > 0) {
+                    photoUsePrev = true
+                    clog("PHOTO '이전' 버튼으로 이동이 확인되어 이후 방향을 이전으로 전환")
+                }
                 photoSame = 0
                 photoLastId = id
                 clog("PHOTO step=$photoSteps ${if (isNew) "신규" else "시작점(이미 수집됨)"} photoId=$id (누적 ${set.size})")
@@ -431,7 +471,7 @@ class MainActivity : Activity() {
                 // 같은 사진 유지: 홀수 회는 느린 이동일 수 있으니 기다리기만 하고, 짝수 회에 다른 방법으로 시도
                 photoSame++
                 clog("PHOTO step=$photoSteps 같은 photoId 유지 id=$id (연속 $photoSame)")
-                if (photoSame >= 6) {
+                if (photoSame >= 8) {
                     finishPhoto("더 이상 다음 사진이 없거나 넘기기에 실패 (같은 photoId 반복)")
                 } else {
                     if (photoSame % 2 == 0) triggerNext(photoSame / 2)
@@ -443,18 +483,35 @@ class MainActivity : Activity() {
         }
     }
 
+    /** strategy 0=버튼 클릭, 1=오른쪽 방향키, 2=마우스 이벤트, 3=이전 버튼 시도 */
     private fun triggerNext(strategy: Int) {
-        val js = NEXT_JS.replace("__SELS__", NEXT_SELS).replace("__S__", strategy.toString())
+        val usePrev = strategy == 3 || photoUsePrev
+        lastTriggerPrev = usePrev
+        val s = if (strategy == 3) 0 else strategy
+        val sels = if (usePrev) PREV_SELS else NEXT_SELS
+        val js = NEXT_JS.replace("__SELS__", sels).replace("__S__", s.toString())
         web.evaluateJavascript(js) { raw ->
             if (photoSteps <= 5 || strategy > 0) {
-                clog("PHOTO NEXT 전략=$strategy 결과=${decode(raw)}")
+                clog("PHOTO ${if (usePrev) "PREV" else "NEXT"} 전략=$strategy 결과=${decode(raw)}")
             }
+        }
+        if (photoSteps <= 3 || strategy > 0) {
+            handler.postDelayed({
+                if (photoRunning) {
+                    web.evaluateJavascript(PROBE_JS) { raw ->
+                        clog("PHOTO 상태(전략=$strategy, 0.9초 후): ${decode(raw)}")
+                    }
+                }
+            }, 900)
         }
     }
 
     private fun diagNext() {
         web.evaluateJavascript(DIAG_JS.replace("__SELS__", DIAG_SELS)) { raw ->
-            clog("PHOTO 다음 버튼 후보: ${decode(raw)}")
+            clog("PHOTO 버튼 후보: ${decode(raw)}")
+        }
+        web.evaluateJavascript(PROBE_JS) { raw ->
+            clog("PHOTO 초기 상태: ${decode(raw)}")
         }
     }
 
