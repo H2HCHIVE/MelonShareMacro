@@ -4,7 +4,9 @@ enum class Cat(
     val label: String,
     val listUrl: String,
     val detailUrl: String,
-    val patterns: List<Regex>
+    val patterns: List<Regex>,
+    val desktop: Boolean = true,
+    val pathMarker: String = ""
 ) {
     SONG(
         "곡",
@@ -16,7 +18,9 @@ enum class Cat(
             Regex("playSong\\w*\\(\\s*['\"]?\\d+['\"]?\\s*,\\s*['\"]?(\\d{4,})"),
             Regex("name=[\"']input_check[\"'][^>]*value=[\"'](\\d{4,})[\"']"),
             Regex("value=[\"'](\\d{4,})[\"'][^>]*name=[\"']input_check[\"']")
-        )
+        ),
+        desktop = true,
+        pathMarker = "/artist/song.htm"
     ),
     ALBUM(
         "앨범",
@@ -25,16 +29,23 @@ enum class Cat(
         listOf(
             Regex("albumId=(\\d{4,})"),
             Regex("goAlbumDetail\\w*\\(\\s*['\"]?(\\d{4,})")
-        )
+        ),
+        desktop = true,
+        pathMarker = "/artist/album.htm"
     ),
     MV(
         "영상",
-        "https://www.melon.com/artist/video.htm?artistId=4096106",
-        "https://www.melon.com/mv/detail.htm?mvId=",
+        "https://m2.melon.com/artist/video.htm?artistId=4096106",
+        "https://www.melon.com/video/detail2.htm?mvId=",
         listOf(
             Regex("mvId=(\\d{4,})"),
-            Regex("goMvDetail\\w*\\(\\s*['\"]?(\\d{4,})")
-        )
+            Regex("goMvDetail\\w*\\(\\s*['\"]?(\\d{4,})"),
+            Regex("(?:play|go)(?:Mv|Video)\\w*\\(\\s*['\"]?(\\d{4,})"),
+            Regex("[\"']?mvId[\"']?\\s*[:=]\\s*[\"']?(\\d{4,})"),
+            Regex("data-mv-?id=[\"'](\\d{4,})[\"']", RegexOption.IGNORE_CASE)
+        ),
+        desktop = false,
+        pathMarker = "/artist/video.htm"
     ),
     PHOTO(
         "포토",
@@ -42,13 +53,22 @@ enum class Cat(
         "https://www.melon.com/photo/detail.htm?photoId=",
         listOf(
             Regex("photoId=(\\d{4,})"),
-            Regex("goPhotoDetail\\w*\\(\\s*['\"]?(\\d{4,})")
-        )
+            Regex("goPhotoDetail\\w*\\(\\s*['\"]?(\\d{4,})"),
+            Regex("[\"']?photoId[\"']?\\s*[:=]\\s*[\"']?(\\d{4,})"),
+            Regex("data-photo-?(?:id|no)=[\"'](\\d{4,})[\"']", RegexOption.IGNORE_CASE)
+        ),
+        desktop = true,
+        pathMarker = "/artist/photo.htm"
     )
 }
 
 object MacroState {
     const val OPEN_CHAT_URL = "https://open.kakao.com/o/g5yc3uXi"
+
+    const val UA_DESKTOP =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    const val UA_MOBILE =
+        "Mozilla/5.0 (Linux; Android 13; SM-S918N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
 
     val collected = mutableMapOf<Cat, LinkedHashSet<String>>()
     @Volatile var queue: List<String> = emptyList()
