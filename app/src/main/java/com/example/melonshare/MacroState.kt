@@ -11,7 +11,7 @@ enum class Cat(
     SONG(
         "곡",
         "https://www.melon.com/artist/song.htm?artistId=4096106",
-        "https://www.melon.com/song/detail.htm?songId=",
+                "https://www.melon.com/artist/photo_detail.htm?artistId=4096106&orderBy=NEW&photoId=",
         listOf(
             Regex("songId=(\\d{4,})"),
             Regex("goSongDetail\\w*\\(\\s*['\"]?(\\d{4,})"),
