@@ -6,6 +6,8 @@ import android.content.ClipData
 import android.content.Intent
 import android.graphics.Bitmap
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.util.Log
 import android.webkit.WebView
@@ -26,9 +28,80 @@ import java.util.Locale
 class MainActivity : Activity() {
     private lateinit var web: WebView
     private lateinit var status: TextView
+    private lateinit var photoBtn: Button
     private var current = Cat.SONG
     @Volatile private var pageReady = false
     private val logTime = SimpleDateFormat("HH:mm:ss", Locale.US)
+    private val handler = Handler(Looper.getMainLooper())
+
+    // 포토 순회 상태
+    private var photoRunning = false
+    private var photoLastId: String? = null
+    private var photoSame = 0
+    private var photoNoId = 0
+    private var photoSteps = 0
+    private var photoNew = 0
+
+    private val NEXT_SELS = """['.btn_next','.btn-next','.swiper-button-next','.slick-next','.owl-next','a[class*="next"]','button[class*="next"]','[class*="btn_nxt"]','[title*="다음"]','[aria-label*="다음"]','[alt*="다음"]','.next']"""
+
+    private val FIRST_PHOTO_JS = """
+(function(){
+  var sels=['a[href*="photo_detail"]','[onclick*="photo_detail"]','[onclick*="PhotoDetail"]','[onclick*="goPhoto"]','a[href*="photoId"]','[data-photo-id]','[data-photoid]','[class*="photo"] li a','[class*="photo"] li img'];
+  for(var i=0;i<sels.length;i++){
+    var els=document.querySelectorAll(sels[i]);
+    for(var j=0;j<els.length;j++){
+      var e=els[j];
+      if(e.offsetParent!==null||e.getClientRects().length>0){
+        e.click();
+        return 'clicked['+sels[i]+']: '+String(e.outerHTML||'').substring(0,160);
+      }
+    }
+  }
+  return 'none: anchors='+document.querySelectorAll('a').length;
+})()
+"""
+
+    private val NEXT_JS = """
+(function(s){
+  function vis(e){return e&&(e.offsetParent!==null||e.getClientRects().length>0);}
+  var sels=__SELS__;
+  if(s===0||s===2){
+    for(var i=0;i<sels.length;i++){
+      var els=document.querySelectorAll(sels[i]);
+      for(var j=0;j<els.length;j++){
+        var e=els[j];
+        if(vis(e)){
+          if(s===2){['mousedown','mouseup','click'].forEach(function(t){e.dispatchEvent(new MouseEvent(t,{bubbles:true,cancelable:true,view:window}));});}
+          else{e.click();}
+          return 'btn['+sels[i]+']: '+String(e.outerHTML||'').substring(0,120);
+        }
+      }
+    }
+    return 'no-button';
+  }
+  ['keydown','keyup'].forEach(function(t){
+    var ev=new KeyboardEvent(t,{key:'ArrowRight',code:'ArrowRight',keyCode:39,which:39,bubbles:true});
+    document.dispatchEvent(ev);
+    if(document.body){document.body.dispatchEvent(ev);}
+  });
+  return 'key-ArrowRight';
+})(__S__)
+"""
+
+    private val DIAG_JS = """
+(function(){
+  var sels=__SELS__;
+  var out=[];
+  sels.forEach(function(s){
+    var els=document.querySelectorAll(s);
+    for(var i=0;i<els.length&&out.length<14;i++){
+      var e=els[i];
+      out.push(s+' => '+e.tagName+' class='+String(e.getAttribute('class')||'')+' title='+String(e.getAttribute('title')||'')+' vis='+(e.offsetParent!==null));
+    }
+  });
+  return out.length?out.join(' | '):'no-candidates';
+})()
+"""
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -82,9 +155,16 @@ class MainActivity : Activity() {
             btn(c.label) { openTab(c) }
         }.toTypedArray())
 
+        photoBtn = btn("포토 순회") { togglePhoto() }
+
         val ctl = row(
             btn("현재 페이지 수집") { collect() },
-            btn("초기화") { MacroState.collected.clear(); refresh("초기화됨") }
+            photoBtn,
+            btn("초기화") {
+                if (photoRunning) finishPhoto("초기화로 중단")
+                MacroState.collected.clear()
+                refresh("초기화됨")
+            }
         )
 
         val bottom1 = row(
@@ -93,7 +173,7 @@ class MainActivity : Activity() {
                 shareFile("melon_macro_log.txt", "로그가 없습니다. 접근성 서비스를 켜고 '시작'을 한 번 실행한 뒤 다시 눌러주세요")
             },
             btn("수집 로그") {
-                shareFile("melon_collect_log.txt", "수집 로그가 없습니다. '현재 페이지 수집'을 한 번 누른 뒤 다시 눌러주세요")
+                shareFile("melon_collect_log.txt", "수집 로그가 없습니다. 수집을 한 번 실행한 뒤 다시 눌러주세요")
             }
         )
 
@@ -134,6 +214,7 @@ class MainActivity : Activity() {
 
     /** 탭 전환: UA를 먼저 맞추고 새로 로딩. 로딩이 끝나기 전에는 수집 불가 */
     private fun openTab(c: Cat) {
+        if (photoRunning) finishPhoto("탭 전환으로 중단")
         current = c
         pageReady = false
         web.stopLoading()
@@ -143,8 +224,14 @@ class MainActivity : Activity() {
         refresh("${c.label} 로딩 중…")
     }
 
+    // ================= 곡 / 앨범 / 영상: 목록 HTML 수집 (변경 없음) =================
+
     private fun collect() {
         val cat = current
+        if (cat == Cat.PHOTO) {
+            toast("포토는 '포토 순회' 버튼을 사용하세요")
+            return
+        }
         val url = web.url ?: ""
         if (!pageReady && web.progress < 100) {
             toast("페이지 로딩 중입니다. 잠시 후 다시 누르세요")
@@ -153,7 +240,7 @@ class MainActivity : Activity() {
         val onTabPage = cat.pathMarker.isEmpty() || url.contains(cat.pathMarker)
         if (!onTabPage) {
             clog("COLLECT 주의: ${cat.label} 탭인데 현재 URL=$url")
-            if (cat == Cat.MV || cat == Cat.PHOTO) {
+            if (cat == Cat.MV) {
                 toast("현재 화면이 '${cat.label}' 목록이 아닙니다. 탭을 다시 눌러주세요")
                 return
             }
@@ -161,10 +248,9 @@ class MainActivity : Activity() {
         collectAttempt(cat, 1, LinkedHashSet())
     }
 
-    /** 새 ID가 더 나오지 않을 때까지 0.8초 간격으로 다시 읽는다 (동적 렌더링 대기) */
     private fun collectAttempt(cat: Cat, attempt: Int, acc: LinkedHashSet<String>) {
-        val maxAttempts = if (cat == Cat.MV || cat == Cat.PHOTO) 10 else 6
-        val scroll = if (cat == Cat.MV || cat == Cat.PHOTO) "window.scrollTo(0,document.body.scrollHeight);" else ""
+        val maxAttempts = if (cat == Cat.MV) 10 else 6
+        val scroll = if (cat == Cat.MV) "window.scrollTo(0,document.body.scrollHeight);" else ""
         val js = "(function(){" + scroll +
             "return JSON.stringify({h:document.documentElement.outerHTML," +
             "t:(document.body?document.body.innerText:'')});})()"
@@ -208,12 +294,159 @@ class MainActivity : Activity() {
             clog("  ID 샘플: ${acc.take(5)}")
             val samples = Regex("(?:onclick|href|data-[\\w-]+)=[\"']([^\"']*(?:mv|Mv|MV|video|Video|photo|Photo)[^\"']*)[\"']")
                 .findAll(html).map { it.groupValues[1].take(150) }.distinct().take(12).toList()
-            if (cat == Cat.MV || cat == Cat.PHOTO || acc.isEmpty()) {
+            if (cat == Cat.MV || acc.isEmpty()) {
                 samples.forEach { clog("  후보속성: $it") }
             }
             refresh("${cat.label} ${added}개 추가 (이번 ${acc.size}개 발견)")
         }
     }
+
+    // ================= 포토: 상세 페이지 순회로 URL의 photoId 수집 =================
+
+    private fun decode(raw: String?): String = try {
+        JSONTokener(raw ?: "null").nextValue() as? String ?: ""
+    } catch (e: Exception) {
+        raw ?: ""
+    }
+
+    private fun readHref(cb: (String) -> Unit) {
+        web.evaluateJavascript("(function(){return location.href;})()") { raw ->
+            val h = decode(raw)
+            cb(if (h.isNotEmpty()) h else (web.url ?: ""))
+        }
+    }
+
+    private fun togglePhoto() {
+        if (photoRunning) {
+            finishPhoto("사용자가 중지")
+            return
+        }
+        if (current != Cat.PHOTO) {
+            toast("먼저 '포토' 탭을 누르세요")
+            return
+        }
+        if (!pageReady && web.progress < 100) {
+            toast("페이지 로딩 중입니다. 잠시 후 다시 누르세요")
+            return
+        }
+        photoRunning = true
+        photoLastId = null; photoSame = 0; photoNoId = 0; photoSteps = 0; photoNew = 0
+        photoBtn.text = "순회 중지"
+        val url = web.url ?: ""
+        clog("PHOTO 순회 시작 url=$url")
+        when {
+            url.contains("photo_detail") -> {
+                diagNext()
+                handler.postDelayed({ photoStep() }, 300)
+            }
+            url.contains("/artist/photo.htm") -> clickFirstPhoto()
+            else -> finishPhoto("포토 목록/상세 페이지가 아닙니다 (url=$url)")
+        }
+    }
+
+    private fun clickFirstPhoto() {
+        web.evaluateJavascript(FIRST_PHOTO_JS) { raw ->
+            val r = decode(raw)
+            clog("PHOTO 첫 사진 클릭 결과: $r")
+            if (!photoRunning) return@evaluateJavascript
+            if (r.startsWith("none")) {
+                finishPhoto("목록에서 첫 사진 요소를 찾지 못했습니다. 첫 사진을 직접 눌러 상세로 들어간 뒤 다시 눌러주세요")
+            } else {
+                waitDetail(0)
+            }
+        }
+    }
+
+    private fun waitDetail(tries: Int) {
+        if (!photoRunning) return
+        readHref { href ->
+            if (!photoRunning) return@readHref
+            if (href.contains("photo_detail") && href.contains("photoId=")) {
+                clog("PHOTO 상세 진입 확인 href=$href")
+                diagNext()
+                handler.postDelayed({ photoStep() }, 400)
+            } else if (tries >= 12) {
+                finishPhoto("상세 페이지로 이동하지 않았습니다 (href=$href)")
+            } else {
+                handler.postDelayed({ waitDetail(tries + 1) }, 700)
+            }
+        }
+    }
+
+    private fun photoStep() {
+        if (!photoRunning) return
+        photoSteps++
+        if (photoSteps > 600) {
+            finishPhoto("최대 단계(600) 도달")
+            return
+        }
+        readHref { href ->
+            if (!photoRunning) return@readHref
+            val id = Regex("[?&]photoId=(\\d+)").find(href)?.groupValues?.get(1)
+            val set = MacroState.collected.getOrPut(Cat.PHOTO) { LinkedHashSet() }
+            if (id == null) {
+                photoNoId++
+                clog("PHOTO step=$photoSteps photoId 없음 href=$href (연속 $photoNoId)")
+                if (photoNoId >= 8) {
+                    finishPhoto("URL에서 photoId를 읽지 못했습니다")
+                } else {
+                    handler.postDelayed({ photoStep() }, 700)
+                }
+                return@readHref
+            }
+            photoNoId = 0
+            if (id !in set) {
+                set.add(id)
+                photoNew++
+                photoSame = 0
+                photoLastId = id
+                clog("PHOTO step=$photoSteps 신규 photoId=$id (누적 ${set.size})")
+                refresh("포토 순회 중… 신규 $photoNew (누적 ${set.size})")
+                triggerNext(0)
+                handler.postDelayed({ photoStep() }, 1000)
+            } else if (id == photoLastId) {
+                // 같은 사진 유지: 홀수 회는 느린 이동일 수 있으니 기다리기만 하고, 짝수 회에 다른 방법으로 시도
+                photoSame++
+                clog("PHOTO step=$photoSteps 같은 photoId 유지 id=$id (연속 $photoSame)")
+                if (photoSame >= 6) {
+                    finishPhoto("더 이상 다음 사진이 없거나 넘기기에 실패 (같은 photoId 반복)")
+                } else {
+                    if (photoSame % 2 == 0) triggerNext(photoSame / 2)
+                    handler.postDelayed({ photoStep() }, 1000)
+                }
+            } else {
+                finishPhoto("이미 수집한 photoId($id)로 돌아왔습니다 (순환 종료)")
+            }
+        }
+    }
+
+    private fun triggerNext(strategy: Int) {
+        val js = NEXT_JS.replace("__SELS__", NEXT_SELS).replace("__S__", strategy.toString())
+        web.evaluateJavascript(js) { raw ->
+            if (photoSteps <= 5 || strategy > 0) {
+                clog("PHOTO NEXT 전략=$strategy 결과=${decode(raw)}")
+            }
+        }
+    }
+
+    private fun diagNext() {
+        web.evaluateJavascript(DIAG_JS.replace("__SELS__", NEXT_SELS)) { raw ->
+            clog("PHOTO 다음 버튼 후보: ${decode(raw)}")
+        }
+    }
+
+    private fun finishPhoto(reason: String) {
+        photoRunning = false
+        handler.removeCallbacksAndMessages(null)
+        photoBtn.text = "포토 순회"
+        val set = MacroState.collected[Cat.PHOTO]
+        val sample = set?.firstOrNull()?.let { Cat.PHOTO.detailUrl + it }
+        clog("PHOTO 종료: $reason 신규=$photoNew 누적=${set?.size ?: 0} 샘플URL=$sample")
+        refresh("포토 순회 종료: $reason")
+        toast("포토 ${set?.size ?: 0}개 — $reason")
+    }
+
+    // ================= 공통 =================
 
     private fun clog(msg: String) {
         Log.d("MelonCollect", msg)
