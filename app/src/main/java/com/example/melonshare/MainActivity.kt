@@ -47,7 +47,8 @@ class MainActivity : Activity() {
     private val photoVisited = LinkedHashSet<String>()
 
     // 포토 상세 페이지의 다음 버튼
-    private val NEXT_SELS = """['button.btn_photo_next','button[data-action="next"]']"""
+    // button뿐 아니라 a 태그 등에도 대응
+    private val NEXT_SELS = """['.btn_photo_next','[data-action="next"]']"""
 
     private val DIAG_SELS = """['.btn_photo_next','button[data-action]','[title*="이전"]','[title*="다음"]']"""
 
