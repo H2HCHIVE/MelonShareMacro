@@ -30,7 +30,7 @@ class MacroService : AccessibilityService() {
         private const val GAP_MS = 1_200L
     }
 
-    private enum class Phase { IDLE, PICK, CONFIRM, GAP }
+    private enum class Phase { IDLE, PICK, DIRECT, CONFIRM, GAP }
 
     private val h = Handler(Looper.getMainLooper())
     private var phase = Phase.IDLE
@@ -39,10 +39,13 @@ class MacroService : AccessibilityService() {
     private var firstClickAt = 0L
     private var lastClickAt = 0L
     private var kakaoChangeAt = 0L
+    private var memoSeenAt = 0L
+    private var chatRoomSeenAt = 0L
+    private var lockSeenAt = 0L
     private var clicks = 0
     private var typed = false
 
-    // 시작 시점에 복사해 두는 대기열과 서비스 자체 위치값 (MacroState 값이 덮어써져도 영향 없음)
+    // 시작 시점에 복사해 두는 대기열과 서비스 자체 위치값
     private var items: List<String> = emptyList()
     private var cursor = 0
     private val done = HashSet<Int>()
@@ -130,8 +133,13 @@ class MacroService : AccessibilityService() {
         kakaoEvents++
         when (event.eventType) {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
-                kakaoChangeAt = SystemClock.uptimeMillis()
-                log("EVENT 카톡 WINDOW_STATE_CHANGED class=${event.className} (launch 후 ${kakaoChangeAt - launchAt}ms)")
+                val now = SystemClock.uptimeMillis()
+                kakaoChangeAt = now
+                val cls = event.className?.toString() ?: ""
+                if (cls.endsWith("MemoChatConnectActivity")) memoSeenAt = now
+                if (cls.contains("ChatRoom")) chatRoomSeenAt = now
+                if (cls.contains("lockscreen") || cls.contains("PatternLock")) lockSeenAt = now
+                log("EVENT 카톡 WINDOW_STATE_CHANGED class=$cls (launch 후 ${now - launchAt}ms)")
             }
             AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> contentEvents++
         }
@@ -158,7 +166,7 @@ class MacroService : AccessibilityService() {
             type = "text/plain"
             setPackage(KAKAO)
             putExtra(Intent.EXTRA_TEXT, url)
-            // CLEAR_TASK: 이전 공유 화면/채팅방이 쌓여 있지 않도록 카톡 작업 스택을 비우고 새로 연다
+            // CLEAR_TASK: 이전 카톡 화면이 쌓여 있지 않도록 작업 스택을 비우고 새로 연다
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
         }
         launchAt = SystemClock.uptimeMillis()
@@ -180,7 +188,7 @@ class MacroService : AccessibilityService() {
         if (tickCount % 3 == 0) {
             log(
                 "TICK phase=$phase sinceLaunch=${now - launchAt}ms " +
-                    "kakaoWindowOpened=${kakaoChangeAt > launchAt} " +
+                    "kakaoWindowOpened=${kakaoChangeAt > launchAt} memoSeen=${memoSeenAt > launchAt} " +
                     "kakaoEvents=$kakaoEvents(content=$contentEvents) " +
                     "activePkg=${rootInActiveWindow?.packageName} " +
                     "clicks=$clicks lastClickAgo=${if (lastClickAt == 0L) -1 else now - lastClickAt}ms"
@@ -188,6 +196,7 @@ class MacroService : AccessibilityService() {
         }
         when (phase) {
             Phase.PICK -> stepPick(now)
+            Phase.DIRECT -> stepDirect(now)
             Phase.CONFIRM -> stepConfirm(now)
             Phase.GAP -> if (now - phaseAt >= GAP_MS) {
                 log("GAP 종료 → 다음 링크 launchNext() 호출")
@@ -198,6 +207,17 @@ class MacroService : AccessibilityService() {
     }
 
     private fun stepPick(now: Long) {
+        if (lockSeenAt > launchAt) {
+            log("PICK: 카톡 잠금 화면 감지")
+            failStop("카카오톡 잠금 화면이 떠 있습니다. 잠금을 해제한 뒤 다시 시작하세요")
+            return
+        }
+        // 공유 화면 없이 나와의 채팅으로 바로 전달되는 경로
+        if (memoSeenAt > launchAt) {
+            log("PICK: MemoChatConnectActivity 감지 → 직접 전달 경로(DIRECT)로 판단, 채팅방 선택/버튼 클릭 없이 진행")
+            phase = Phase.DIRECT
+            return
+        }
         val opened = kakaoChangeAt > launchAt
         if (!opened) {
             if (now - launchAt > NO_WINDOW_TIMEOUT) {
@@ -224,6 +244,28 @@ class MacroService : AccessibilityService() {
             toast("채팅방 선택됨")
             phase = Phase.CONFIRM
             phaseAt = now
+        }
+    }
+
+    /** 직접 전달 경로: 전달 화면이 끝나고 카톡이 닫히거나 채팅방이 열리면 완료 */
+    private fun stepDirect(now: Long) {
+        if (lockSeenAt > launchAt) {
+            log("DIRECT: 카톡 잠금 화면 감지")
+            failStop("카카오톡 잠금 화면이 떠 있습니다. 잠금을 해제한 뒤 다시 시작하세요")
+            return
+        }
+        val sinceMemo = now - memoSeenAt
+        val activePkg = rootInActiveWindow?.packageName?.toString()
+        val leftKakao = activePkg != null && activePkg != KAKAO
+        val chatRoomOpened = chatRoomSeenAt > memoSeenAt
+        if (sinceMemo > SETTLE_MS && (leftKakao || chatRoomOpened)) {
+            complete("직접 전달 후 " + if (leftKakao) "카톡 화면 종료 확인" else "채팅방 열림 확인")
+            return
+        }
+        if (sinceMemo > CONFIRM_WAIT) {
+            log("DIRECT: ${sinceMemo}ms 지나도 완료 근거 없음 activePkg=$activePkg chatRoomOpened=$chatRoomOpened")
+            dumpScreen("direct-stuck")
+            failStop("나와의 채팅 전달 완료를 확인하지 못했습니다")
         }
     }
 
@@ -281,12 +323,12 @@ class MacroService : AccessibilityService() {
         phaseAt = SystemClock.uptimeMillis()
     }
 
-    /** 같은 링크를 다시 띄우면 공유 화면이 중복되므로 재시도하지 않고 멈춘다 */
+    /** 같은 링크를 다시 띄우면 중복 전송되므로 재시도하지 않고 멈춘다 */
     private fun failStop(reason: String) {
         stop("$reason — ${cursor + 1}/${items.size}번째 링크에서 중단 (중복 방지를 위해 자동 재시도 안 함)")
     }
 
-    // ---------- 화면 조작 ----------
+    // ---------- 화면 조작 (공유 화면 예비 경로) ----------
 
     private fun selectRoom(root: AccessibilityNodeInfo): Boolean {
         val hits = root.findAccessibilityNodeInfosByText(MacroState.roomName)
@@ -341,6 +383,14 @@ class MacroService : AccessibilityService() {
         return null
     }
 
+    /** 개인정보 보호: 확인/전송 문구와 채팅방 이름 외의 글자는 길이만 기록 */
+    private fun mask(s: String?): String {
+        if (s.isNullOrEmpty()) return ""
+        val keep = s in CONFIRM_LABELS ||
+            (MacroState.roomName.isNotEmpty() && s.contains(MacroState.roomName))
+        return if (keep) s else "(${s.length}자)"
+    }
+
     private fun dumpScreen(tag: String) {
         val root = rootInActiveWindow
         if (root == null) {
@@ -356,7 +406,7 @@ class MacroService : AccessibilityService() {
             if (!t.isNullOrEmpty() || !d.isNullOrEmpty()) {
                 count++
                 log(
-                    "  ${"-".repeat(depth)} text='${t ?: ""}' desc='${d ?: ""}' " +
+                    "  ${"-".repeat(depth)} text='${mask(t)}' desc='${mask(d)}' " +
                         "cls=${n.className?.toString()?.substringAfterLast('.')} " +
                         "click=${n.isClickable} edit=${n.isEditable}"
                 )
