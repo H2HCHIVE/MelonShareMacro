@@ -1,3 +1,4 @@
+
 package com.example.melonshare
 
 enum class Cat(
@@ -11,7 +12,7 @@ enum class Cat(
     SONG(
         "곡",
         "https://www.melon.com/artist/song.htm?artistId=4096106",
-                "https://www.melon.com/artist/photo_detail.htm?artistId=4096106&orderBy=NEW&photoId=",
+        "https://www.melon.com/song/detail.htm?songId=",
         listOf(
             Regex("songId=(\\d{4,})"),
             Regex("goSongDetail\\w*\\(\\s*['\"]?(\\d{4,})"),
@@ -22,6 +23,7 @@ enum class Cat(
         desktop = true,
         pathMarker = "/artist/song.htm"
     ),
+
     ALBUM(
         "앨범",
         "https://www.melon.com/artist/album.htm?artistId=4096106",
@@ -33,6 +35,7 @@ enum class Cat(
         desktop = true,
         pathMarker = "/artist/album.htm"
     ),
+
     MV(
         "영상",
         "https://m2.melon.com/artist/video.htm?artistId=4096106",
@@ -47,10 +50,11 @@ enum class Cat(
         desktop = false,
         pathMarker = "/artist/video.htm"
     ),
+
     PHOTO(
         "포토",
         "https://www.melon.com/artist/photo.htm?artistId=4096106",
-        "https://www.melon.com/photo/detail.htm?photoId=",
+        "https://www.melon.com/artist/photo_detail.htm?artistId=4096106&orderBy=NEW&photoId=",
         listOf(
             Regex("photoId=(\\d{4,})"),
             Regex("goPhotoDetail\\w*\\(\\s*['\"]?(\\d{4,})"),
@@ -67,10 +71,12 @@ object MacroState {
 
     const val UA_DESKTOP =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
     const val UA_MOBILE =
         "Mozilla/5.0 (Linux; Android 13; SM-S918N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
 
     val collected = mutableMapOf<Cat, LinkedHashSet<String>>()
+
     @Volatile var queue: List<String> = emptyList()
     @Volatile var running = false
     @Volatile var roomName = ""
@@ -78,6 +84,8 @@ object MacroState {
 
     fun buildQueue(): List<String> =
         Cat.values().flatMap { c ->
-            (collected[c] ?: emptySet<String>()).map { c.detailUrl + it }
+            (collected[c] ?: emptySet<String>()).map { id ->
+                c.detailUrl + id
+            }
         }
 }
